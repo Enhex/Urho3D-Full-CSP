@@ -23,7 +23,7 @@ using namespace Urho3D;
 
 // remote event: server's last received input ID
 static const StringHash E_CSP_last_input("CSP_last_input");
-
+static const StringHash P_CSP_ID("CSP_ID");
 
 /*
 Client side prediction.
@@ -39,12 +39,23 @@ struct ClientSidePrediction : Component
 	// Register object factory and attributes.
 	static void RegisterObject(Context* context);
 
+	// scene that replicates in the background
+	SharedPtr<Scene> replication_scene;
+
+	// Current's tick controls input
+	Controls* current_controls = nullptr;
+	bool enable_copy = true;//TODO used for testing
 
 	bool Connect(const String& address, unsigned short port, const VariantMap& identity = Variant::emptyVariantMap);
 
 	// Tags the input with "id" extraData, adds it to the input buffer
 	void add_input(Controls& input);
 
+	// send the last received input's ID
+	void send_input_ID(Connection* client);
+
+	// do client-side prediction
+	void predict();
 
 protected:
 	// current client-side update ID
@@ -55,12 +66,6 @@ protected:
 	// Input buffer
 	std::vector<Controls> input_buffer;
 
-	// scene that replicates in the background
-	SharedPtr<Scene> replication_scene;
-
-	// do client-side prediction
-	void predict();
-
 	// Re-apply all the inputs since after the current server ID to the current ID to correct the current network state.
 	void reapply_inputs();
 
@@ -70,6 +75,7 @@ protected:
 	void copy_scene();
 
 	void HandleLastInput(StringHash eventType, VariantMap& eventData);
+	void HandleNetworkUpdate(StringHash eventType, VariantMap& eventData);
 };
 
 void copy_node(Node& source, Node& destination);

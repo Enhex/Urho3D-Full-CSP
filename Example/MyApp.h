@@ -3,6 +3,7 @@
 
 #include <Urho3D/Engine/Application.h>
 #undef TRANSPARENT
+#include <Urho3D/Input/Controls.h>
 
 struct ClientSidePrediction;
 namespace Urho3D {
@@ -13,7 +14,8 @@ namespace Urho3D {
 	class Button;
 	class LineEdit;
 	class Connection;
-	class Controls;
+	//class Controls;
+	class RigidBody;
 }
 
 using namespace Urho3D;
@@ -36,8 +38,14 @@ struct MyApp : Application
 	/// Camera pitch angle.
 	float pitch_ = 0.f;
 
+	bool is_client = false; // for testing
+
+	Controls sampled_controls;
+
 	void Setup();
 	void Start() override;
+
+	void sample_controls();
 
 protected:
 	/// Mapping from client connections to controllable objects.
@@ -77,6 +85,8 @@ protected:
 
 	/// Handle scene update event to control camera's pitch and yaw for all samples.
 	void HandleSceneUpdate(StringHash eventType, VariantMap& eventData);
+
+	void process_controls(const Controls& controls, RigidBody* body);
 
 	/// Handle the physics world pre-step event.
 	void HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData);

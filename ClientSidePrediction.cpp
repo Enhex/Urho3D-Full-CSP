@@ -17,12 +17,13 @@ ClientSidePrediction::ClientSidePrediction(Context * context) :
 	Component(context)
 {
 	replication_scene = MakeShared<Scene>(context);
+	auto physicsWorld = replication_scene->CreateComponent<PhysicsWorld>(LOCAL);
+	physicsWorld->SetUpdateEnabled(false);//TODO null at this point
 
 	SubscribeToEvent(E_CSP_last_input, URHO3D_HANDLER(ClientSidePrediction, HandleLastInput));
+	SubscribeToEvent(E_NETWORKUPDATE, URHO3D_HANDLER(ClientSidePrediction, HandleNetworkUpdate));
 
-	SubscribeToEvent(E_SCENEUPDATE, [&](StringHash type, VariantMap& args) {
-		copy_scene();
-	});
+	GetSubsystem<Network>()->RegisterRemoteEvent(E_CSP_last_input);
 }
 
 
@@ -35,11 +36,17 @@ bool ClientSidePrediction::Connect(const String & address, unsigned short port, 
 {
 	auto network = GetSubsystem<Network>();
 	return network->Connect(address, port, replication_scene);
+
+	// CSP is going to manually update the client's scene
+	GetScene()->SetUpdateEnabled(false);
+	replication_scene->SetUpdateEnabled(false);
 }
 
 
 void ClientSidePrediction::add_input(Controls& new_input)
 {
+	current_controls = nullptr;
+
 	// Increment the update ID by 1
 	++id;
 	// Tag the new input with an id, so the id is passed to the server
@@ -48,30 +55,44 @@ void ClientSidePrediction::add_input(Controls& new_input)
 	input_buffer.push_back(new_input);
 }
 
+void ClientSidePrediction::send_input_ID(Connection* client)
+{
+	VariantMap remoteEventData;
+	auto id_data = client->GetControls().extraData_["id"];
+	if (id_data != nullptr) {
+		remoteEventData[P_CSP_ID] = id_data->GetUInt();
+		client->SendRemoteEvent(E_CSP_last_input, false, remoteEventData);
+	}
+}
 
-//
-// predict
-//
+
 void ClientSidePrediction::predict()
 {
+	copy_scene();
+
 	remove_obsolete_history();
 	reapply_inputs();
 }
 
 
-//
-// reapply_inputs
-//
 void ClientSidePrediction::reapply_inputs()
 {
 	auto network = GetSubsystem<Network>();
 	const auto timestep = 1.f / network->GetUpdateFps();
 
+	auto scene = GetScene();
+	auto physicsWorld = scene->GetComponent<PhysicsWorld>();
+
 	for (auto& controls : input_buffer)
 	{
 		// step a tick
 		//TODO
+		current_controls = &controls;
+		scene->Update(timestep);
+		//physicsWorld->Update(timestep);
 	}
+
+	current_controls = nullptr;
 }
 
 
@@ -112,11 +133,23 @@ void ClientSidePrediction::remove_obsolete_history()
 void ClientSidePrediction::copy_scene()
 {
 	auto scene = GetScene();
-	copy_child_nodes(*replication_scene, *scene);
+	if(scene)
+		copy_child_nodes(*replication_scene, *scene);
 }
 
 void ClientSidePrediction::HandleLastInput(StringHash eventType, VariantMap & eventData)
 {
+	server_id = eventData[P_CSP_ID].GetUInt();
+}
+
+void ClientSidePrediction::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
+{
+	auto network = GetSubsystem<Network>();
+	auto serverConnection = network->GetServerConnection();
+
+	// client
+	//if(serverConnection && enable_copy)
+		//copy_scene();
 }
 
 void copy_node(Node & source, Node & destination)

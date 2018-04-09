@@ -87,6 +87,24 @@ void MyApp::Start()
 	SubscribeToEvents();
 }
 
+void MyApp::sample_controls()
+{
+	auto ui = GetSubsystem<UI>();
+	auto input = GetSubsystem<Input>();
+
+	// Copy mouse yaw
+	sampled_controls.yaw_ = yaw_;
+
+	// Only apply WASD controls if there is no focused UI element
+	if (!ui->GetFocusElement())
+	{
+		sampled_controls.Set(CTRL_FORWARD, input->GetKeyDown(KEY_W));
+		sampled_controls.Set(CTRL_BACK, input->GetKeyDown(KEY_S));
+		sampled_controls.Set(CTRL_LEFT, input->GetKeyDown(KEY_A));
+		sampled_controls.Set(CTRL_RIGHT, input->GetKeyDown(KEY_D));
+	}
+}
+
 void MyApp::CreateScene()
 {
 	scene = MakeShared<Scene>(context_);
@@ -330,54 +348,6 @@ void MyApp::MoveCamera()
 	instructionsText_->SetVisible(showInstructions);
 }
 
-void MyApp::apply_input(Node* ballNode, const Controls& controls)
-{
-	auto body = ballNode->GetComponent<RigidBody>();
-
-	// Torque is relative to the forward vector
-	Quaternion rotation(0.0f, controls.yaw_, 0.0f);
-
-	/*
-	constexpr float MOVE_TORQUE = 3.0f;
-
-	// Movement torque is applied before each simulation step, which happen at 60 FPS. This makes the simulation
-	// independent from rendering framerate. We could also apply forces (which would enable in-air control),
-	// but want to emphasize that it's a ball which should only control its motion by rolling along the ground
-	if (controls.buttons_ & CTRL_FORWARD)
-		body->ApplyTorque(rotation * Vector3::RIGHT * MOVE_TORQUE);
-	if (controls.buttons_ & CTRL_BACK)
-		body->ApplyTorque(rotation * Vector3::LEFT * MOVE_TORQUE);
-	if (controls.buttons_ & CTRL_LEFT)
-		body->ApplyTorque(rotation * Vector3::FORWARD * MOVE_TORQUE);
-	if (controls.buttons_ & CTRL_RIGHT)
-		body->ApplyTorque(rotation * Vector3::BACK * MOVE_TORQUE);
-	*/
-
-
-	constexpr float MOVE_TORQUE = 1.f / 30.f;
-
-	// Movement torque is applied before each simulation step, which happen at 60 FPS. This makes the simulation
-	// independent from rendering framerate. We could also apply forces (which would enable in-air control),
-	// but want to emphasize that it's a ball which should only control its motion by rolling along the ground
-	if (controls.buttons_ & CTRL_FORWARD)
-		ballNode->SetPosition(ballNode->GetPosition() + Vector3::RIGHT * MOVE_TORQUE);
-	if (controls.buttons_ & CTRL_BACK)
-		ballNode->SetPosition(ballNode->GetPosition() + Vector3::LEFT * MOVE_TORQUE);
-	if (controls.buttons_ & CTRL_LEFT)
-		ballNode->SetPosition(ballNode->GetPosition() + Vector3::FORWARD * MOVE_TORQUE);
-	if (controls.buttons_ & CTRL_RIGHT)
-		ballNode->SetPosition(ballNode->GetPosition() + Vector3::BACK * MOVE_TORQUE);
-}
-
-void MyApp::apply_input(Connection* connection, const Controls& controls)
-{
-	auto ballNode = serverObjects_[connection];
-	if (!ballNode)
-		return;
-
-	apply_input(ballNode, controls);
-}
-
 void MyApp::HandleSceneUpdate(StringHash eventType, VariantMap & eventData)
 {
 	// Move the camera by touch, if the camera node is initialized by descendant sample class
@@ -413,6 +383,26 @@ void MyApp::HandleSceneUpdate(StringHash eventType, VariantMap & eventData)
 	}
 }
 
+void MyApp::process_controls(const Controls & controls, RigidBody* body)
+{
+	// Torque is relative to the forward vector
+	Quaternion rotation(0.0f, controls.yaw_, 0.0f);
+
+	const float MOVE_TORQUE = 3.0f;
+
+	// Movement torque is applied before each simulation step, which happen at 60 FPS. This makes the simulation
+	// independent from rendering framerate. We could also apply forces (which would enable in-air control),
+	// but want to emphasize that it's a ball which should only control its motion by rolling along the ground
+	if (controls.buttons_ & CTRL_FORWARD)
+		body->ApplyTorque(rotation * Vector3::RIGHT * MOVE_TORQUE);
+	if (controls.buttons_ & CTRL_BACK)
+		body->ApplyTorque(rotation * Vector3::LEFT * MOVE_TORQUE);
+	if (controls.buttons_ & CTRL_LEFT)
+		body->ApplyTorque(rotation * Vector3::FORWARD * MOVE_TORQUE);
+	if (controls.buttons_ & CTRL_RIGHT)
+		body->ApplyTorque(rotation * Vector3::BACK * MOVE_TORQUE);
+}
+
 
 void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
 {
@@ -425,11 +415,12 @@ void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
     // Server: apply controls to client objects
     if (network->IsServerRunning())
     {
-        const Vector<SharedPtr<Connection> >& connections = network->GetClientConnections();
+        const auto& connections = network->GetClientConnections();
 
         for (unsigned i = 0; i < connections.Size(); ++i)
         {
             Connection* connection = connections[i];
+
             // Get the object this connection is controlling
             Node* ballNode = serverObjects_[connection];
             if (!ballNode)
@@ -438,25 +429,21 @@ void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
             auto* body = ballNode->GetComponent<RigidBody>();
 
             // Get the last controls sent by the client
-            const Controls& controls = connection->GetControls();
-            // Torque is relative to the forward vector
-            Quaternion rotation(0.0f, controls.yaw_, 0.0f);
+            const auto& controls = connection->GetControls();
 
-            const float MOVE_TORQUE = 3.0f;
-
-            // Movement torque is applied before each simulation step, which happen at 60 FPS. This makes the simulation
-            // independent from rendering framerate. We could also apply forces (which would enable in-air control),
-            // but want to emphasize that it's a ball which should only control its motion by rolling along the ground
-            if (controls.buttons_ & CTRL_FORWARD)
-                body->ApplyTorque(rotation * Vector3::RIGHT * MOVE_TORQUE);
-            if (controls.buttons_ & CTRL_BACK)
-                body->ApplyTorque(rotation * Vector3::LEFT * MOVE_TORQUE);
-            if (controls.buttons_ & CTRL_LEFT)
-                body->ApplyTorque(rotation * Vector3::FORWARD * MOVE_TORQUE);
-            if (controls.buttons_ & CTRL_RIGHT)
-                body->ApplyTorque(rotation * Vector3::BACK * MOVE_TORQUE);
+			process_controls(controls, body);
         }
     }
+	else// if (serverConnection)
+	{
+		auto ballNode = scene->GetNode(clientObjectID_);
+		if (ballNode) {
+			auto* body = ballNode->GetComponent<RigidBody>();
+
+			auto& controls = csp->current_controls ? *csp->current_controls : sampled_controls;
+			process_controls(controls, body);
+		}
+	}
 }
 
 void MyApp::HandlePostUpdate(StringHash eventType, VariantMap & eventData)
@@ -470,35 +457,44 @@ void MyApp::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
 	auto* network = GetSubsystem<Network>();
 	auto* serverConnection = network->GetServerConnection();
 
-	// Client: collect controls before the network update so they'll be synced with the server
-	if (serverConnection)
-	{
-		auto* ui = GetSubsystem<UI>();
-		auto* input = GetSubsystem<Input>();
-		Controls controls;
-
-		// Copy mouse yaw
-		controls.yaw_ = yaw_;
-
-		// Only apply WASD controls if there is no focused UI element
-		if (!ui->GetFocusElement())
-		{
-			controls.Set(CTRL_FORWARD, input->GetKeyDown(KEY_W));
-			controls.Set(CTRL_BACK, input->GetKeyDown(KEY_S));
-			controls.Set(CTRL_LEFT, input->GetKeyDown(KEY_A));
-			controls.Set(CTRL_RIGHT, input->GetKeyDown(KEY_D));
-		}
-
-		csp->add_input(controls); // add before sending, so it will be tagged with an ID
-		serverConnection->SetControls(controls);
-		// In case the server wants to do position-based interest management using the NetworkPriority components, we should also
-		// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
-		serverConnection->SetPosition(cameraNode->GetPosition());
-	}
-	// Server: send last received CSP input ID
+	// Server:
 	if (network->IsServerRunning())
 	{
+		const auto& connections = network->GetClientConnections();
 
+		for (Connection* connection : connections)
+		{
+			// send last received CSP input ID
+			csp->send_input_ID(connection);
+
+			//// Get the object this connection is controlling
+		 //   Node* ballNode = serverObjects_[connection];
+		 //   if (!ballNode)
+		 //       continue;
+		
+		 //   auto* body = ballNode->GetComponent<RigidBody>();
+		
+		 //   // Get the last controls sent by the client
+		 //   const auto& controls = connection->GetControls();
+		
+			//process_controls(controls, body);
+		}
+	}
+	// Client: collect controls before the network update so they'll be synced with the server
+	else if (is_client)//serverConnection)
+	{
+		sample_controls();
+
+		if(serverConnection) {
+			csp->add_input(sampled_controls); // add before sending, so it will be tagged with an ID
+			serverConnection->SetControls(sampled_controls);
+			// In case the server wants to do position-based interest management using the NetworkPriority components, we should also
+			// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
+			serverConnection->SetPosition(cameraNode->GetPosition());
+
+			if (csp->enable_copy)//TODO using it to enable prediction
+				csp->predict();
+		}
 	}
 }
 
@@ -525,9 +521,13 @@ void MyApp::HandleDisconnect(StringHash eventType, VariantMap & eventData)
 	// scene of all replicated content, but let the local nodes & components (the static world + camera) stay
 	if (serverConnection)
 	{
-		serverConnection->Disconnect();
-		scene->Clear(true, false);
+		// need to remove node from both active & replication scenes
+		scene->GetNode(clientObjectID_)->Remove();
+		csp->replication_scene->GetNode(clientObjectID_)->Remove();
 		clientObjectID_ = 0;
+
+		serverConnection->Disconnect();
+		//scene->Clear(true, false);
 	}
 	// Or if we were running a server, stop it
 	else if (network->IsServerRunning())
@@ -586,6 +586,7 @@ void MyApp::HandleClientDisconnected(StringHash eventType, VariantMap & eventDat
 void MyApp::HandleClientObjectID(StringHash eventType, VariantMap & eventData)
 {
 	clientObjectID_ = eventData[P_ID].GetUInt();
+	is_client = true;
 }
 
 //
@@ -598,4 +599,16 @@ void MyApp::HandleKeyDown(StringHash eventType, VariantMap& eventData)
 	int key = eventData[P_KEY].GetInt();
 	if (key == KEY_ESCAPE && GetPlatform() != "Web")
 		engine_->Exit();
+
+	// for testing
+	if (key == KEY_R)
+		csp->enable_copy = !csp->enable_copy;
+
+	if (key == KEY_T) {
+		auto ballNode = scene->GetNode(clientObjectID_);
+		if (ballNode) {
+
+			ballNode->Translate({ 0, 1, 0 });
+		}
+	}
 }
