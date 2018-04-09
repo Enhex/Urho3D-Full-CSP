@@ -85,10 +85,17 @@ void MyApp::Start()
 
 	// Hook up to necessary events
 	SubscribeToEvents();
+
+	//GetSubsystem<Network>()->SetUpdateFps(1);//TODO used for testing
 }
 
 void MyApp::sample_controls()
 {
+	if (did_sample_controls)
+		return;
+
+	did_sample_controls = true;
+
 	auto ui = GetSubsystem<UI>();
 	auto input = GetSubsystem<Input>();
 
@@ -103,6 +110,9 @@ void MyApp::sample_controls()
 		sampled_controls.Set(CTRL_LEFT, input->GetKeyDown(KEY_A));
 		sampled_controls.Set(CTRL_RIGHT, input->GetKeyDown(KEY_D));
 	}
+
+	if (csp->enable_copy)//TODO using it to enable prediction
+		csp->predict();
 }
 
 void MyApp::CreateScene()
@@ -436,6 +446,8 @@ void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
     }
 	else// if (serverConnection)
 	{
+		sample_controls();
+
 		auto ballNode = scene->GetNode(clientObjectID_);
 		if (ballNode) {
 			auto* body = ballNode->GetComponent<RigidBody>();
@@ -454,6 +466,8 @@ void MyApp::HandlePostUpdate(StringHash eventType, VariantMap & eventData)
 
 void MyApp::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
 {
+	did_sample_controls = false;
+
 	auto* network = GetSubsystem<Network>();
 	auto* serverConnection = network->GetServerConnection();
 
@@ -483,8 +497,6 @@ void MyApp::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
 	// Client: collect controls before the network update so they'll be synced with the server
 	else if (is_client)//serverConnection)
 	{
-		sample_controls();
-
 		if(serverConnection) {
 			csp->add_input(sampled_controls); // add before sending, so it will be tagged with an ID
 			serverConnection->SetControls(sampled_controls);
@@ -492,8 +504,8 @@ void MyApp::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
 			// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
 			serverConnection->SetPosition(cameraNode->GetPosition());
 
-			if (csp->enable_copy)//TODO using it to enable prediction
-				csp->predict();
+			//if (csp->enable_copy)//TODO using it to enable prediction
+				//csp->predict();
 		}
 	}
 }
@@ -605,10 +617,6 @@ void MyApp::HandleKeyDown(StringHash eventType, VariantMap& eventData)
 		csp->enable_copy = !csp->enable_copy;
 
 	if (key == KEY_T) {
-		auto ballNode = scene->GetNode(clientObjectID_);
-		if (ballNode) {
-
-			ballNode->Translate({ 0, 1, 0 });
-		}
+		csp->test_predict(sampled_controls);
 	}
 }

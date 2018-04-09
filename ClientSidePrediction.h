@@ -43,7 +43,7 @@ struct ClientSidePrediction : Component
 	SharedPtr<Scene> replication_scene;
 
 	// Current's tick controls input
-	Controls* current_controls = nullptr;
+	Controls const* current_controls = nullptr;
 	bool enable_copy = true;//TODO used for testing
 
 	bool Connect(const String& address, unsigned short port, const VariantMap& identity = Variant::emptyVariantMap);
@@ -56,6 +56,8 @@ struct ClientSidePrediction : Component
 
 	// do client-side prediction
 	void predict();
+
+	void test_predict(const Controls& input);
 
 protected:
 	// current client-side update ID

@@ -74,6 +74,23 @@ void ClientSidePrediction::predict()
 	reapply_inputs();
 }
 
+void ClientSidePrediction::test_predict(const Controls& input)
+{
+	copy_scene();
+
+	auto network = GetSubsystem<Network>();
+	const auto timestep = 1.f / network->GetUpdateFps();
+
+	auto scene = GetScene();
+
+	for (unsigned i = 20; i-- > 0;)
+	{
+		// step a tick
+		current_controls = &input;
+		scene->Update(timestep);
+	}
+}
+
 
 void ClientSidePrediction::reapply_inputs()
 {
@@ -81,17 +98,15 @@ void ClientSidePrediction::reapply_inputs()
 	const auto timestep = 1.f / network->GetUpdateFps();
 
 	auto scene = GetScene();
-	auto physicsWorld = scene->GetComponent<PhysicsWorld>();
 
 	for (auto& controls : input_buffer)
 	{
 		// step a tick
-		//TODO
 		current_controls = &controls;
-		scene->Update(timestep);
-		//physicsWorld->Update(timestep);
+		scene->Update(timestep);//TODO the time-step isn't the same time-step the server uses, thus can cause desync
 	}
 
+	// current controls should only be used while predicting
 	current_controls = nullptr;
 }
 
@@ -144,12 +159,6 @@ void ClientSidePrediction::HandleLastInput(StringHash eventType, VariantMap & ev
 
 void ClientSidePrediction::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
 {
-	auto network = GetSubsystem<Network>();
-	auto serverConnection = network->GetServerConnection();
-
-	// client
-	//if(serverConnection && enable_copy)
-		//copy_scene();
 }
 
 void copy_node(Node & source, Node & destination)

@@ -41,6 +41,7 @@ struct MyApp : Application
 	bool is_client = false; // for testing
 
 	Controls sampled_controls;
+	bool did_sample_controls = false; // did sample controls since the last network update?
 
 	void Setup();
 	void Start() override;
