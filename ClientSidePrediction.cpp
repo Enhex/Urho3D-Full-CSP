@@ -95,16 +95,35 @@ void ClientSidePrediction::test_predict(const Controls& input)
 void ClientSidePrediction::reapply_inputs()
 {
 	auto network = GetSubsystem<Network>();
-	const auto timestep = 1.f / network->GetUpdateFps();
+	const auto network_timestep = 1.f / network->GetUpdateFps();
 
 	auto scene = GetScene();
+	auto physicsWorld = scene->GetComponent<PhysicsWorld>();
+	const auto timestep = 1.f / physicsWorld->GetFps();
+
+	auto physics_ticks_per_network_tick = physicsWorld->GetFps() / network->GetUpdateFps(); // must have no reminder
+
+	//auto total_time = input_buffer.size() * network_timestep;
+
 
 	for (auto& controls : input_buffer)
 	{
 		// step a tick
 		current_controls = &controls;
-		scene->Update(timestep);//TODO the time-step isn't the same time-step the server uses, thus can cause desync
+
+		for (auto remaining_ticks = physics_ticks_per_network_tick; remaining_ticks-- > 0;) {
+			//scene->Update(timestep);//TODO the time-step isn't the same time-step the server uses, thus can cause desync
+			physicsWorld->Update(timestep);
+		}
 	}
+
+	//for (auto& controls : input_buffer)
+	//{
+	//	// step a tick
+	//	current_controls = &controls;
+	//	//scene->Update(timestep);//TODO the time-step isn't the same time-step the server uses, thus can cause desync
+	//	physicsWorld->Update(timestep);
+	//}
 
 	// current controls should only be used while predicting
 	current_controls = nullptr;
