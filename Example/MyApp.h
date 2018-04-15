@@ -31,7 +31,7 @@ struct MyApp : Application
 	SharedPtr<Scene> scene;
     SharedPtr<Node> cameraNode;
 
-	ClientSidePrediction* csp = nullptr;
+	//ClientSidePrediction* csp = nullptr;
 
 	/// Camera yaw angle.
 	float yaw_ = 0.f;
@@ -40,13 +40,10 @@ struct MyApp : Application
 
 	bool is_client = false; // for testing
 
-	Controls sampled_controls;
-	bool did_sample_controls = false; // did sample controls since the last network update?
-
 	void Setup();
 	void Start() override;
 
-	void sample_controls();
+	Controls sample_controls();
 
 protected:
 	/// Mapping from client connections to controllable objects.
@@ -87,14 +84,12 @@ protected:
 	/// Handle scene update event to control camera's pitch and yaw for all samples.
 	void HandleSceneUpdate(StringHash eventType, VariantMap& eventData);
 
-	void process_controls(const Controls& controls, RigidBody* body);
+	void process_controls(Node* ballNode, const Controls & controls);
 
 	/// Handle the physics world pre-step event.
 	void HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData);
 	/// Handle the logic post-update event.
 	void HandlePostUpdate(StringHash eventType, VariantMap& eventData);
-	// capture controls
-	void HandleNetworkUpdate(StringHash eventType, VariantMap& eventData);
 	/// Handle pressing the connect button.
 	void HandleConnect(StringHash eventType, VariantMap& eventData);
 	/// Handle pressing the disconnect button.

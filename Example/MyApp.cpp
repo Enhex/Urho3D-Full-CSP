@@ -1,8 +1,11 @@
 #include "MyApp.h"
 
-#include "../ClientSidePrediction.h"
+#include "../CSP_Client.h"
+#include "../CSP_Server.h"
 
 #include <Urho3D/Core/CoreEvents.h>
+#include <Urho3D/Engine/Console.h>
+#include <Urho3D/Engine/DebugHud.h>
 #include <Urho3D/Engine/Engine.h>
 #include <Urho3D/Graphics/Camera.h>
 #include <Urho3D/Graphics/Graphics.h>
@@ -52,7 +55,9 @@ static const unsigned CTRL_RIGHT = 8;
 MyApp::MyApp(Context* context) :
 Application(context)
 {
-	ClientSidePrediction::RegisterObject(context);
+	//ClientSidePrediction::RegisterObject(context);
+	CSP_Server::RegisterObject(context);
+	CSP_Client::RegisterObject(context);
 }
 
 
@@ -89,42 +94,43 @@ void MyApp::Start()
 	//GetSubsystem<Network>()->SetUpdateFps(1);//TODO used for testing
 }
 
-void MyApp::sample_controls()
+Controls MyApp::sample_controls()
 {
-	if (did_sample_controls)
-		return;
-
-	did_sample_controls = true;
-
 	auto ui = GetSubsystem<UI>();
 	auto input = GetSubsystem<Input>();
 
+	Controls controls;
+
 	// Copy mouse yaw
-	sampled_controls.yaw_ = yaw_;
+	controls.yaw_ = yaw_;
 
 	// Only apply WASD controls if there is no focused UI element
 	if (!ui->GetFocusElement())
 	{
-		sampled_controls.Set(CTRL_FORWARD, input->GetKeyDown(KEY_W));
-		sampled_controls.Set(CTRL_BACK, input->GetKeyDown(KEY_S));
-		sampled_controls.Set(CTRL_LEFT, input->GetKeyDown(KEY_A));
-		sampled_controls.Set(CTRL_RIGHT, input->GetKeyDown(KEY_D));
+		controls.Set(CTRL_FORWARD, input->GetKeyDown(KEY_W));
+		controls.Set(CTRL_BACK, input->GetKeyDown(KEY_S));
+		controls.Set(CTRL_LEFT, input->GetKeyDown(KEY_A));
+		controls.Set(CTRL_RIGHT, input->GetKeyDown(KEY_D));
 	}
 
-	if (csp->enable_copy)//TODO using it to enable prediction
-		csp->predict();
+	//auto csp = scene->GetComponent<CSP_Client>();
+	//csp->predict();
+
+	return controls;
 }
 
 void MyApp::CreateScene()
 {
 	scene = MakeShared<Scene>(context_);
 
-	ResourceCache* cache = GetSubsystem<ResourceCache>();
+	auto cache = GetSubsystem<ResourceCache>();
 
 	// Create octree and physics world with default settings. Create them as local so that they are not needlessly replicated
 	// when a client connects
 	scene->CreateComponent<Octree>(LOCAL);
 	auto physicsWorld = scene->CreateComponent<PhysicsWorld>(LOCAL);
+	
+	//physicsWorld->SetFps(10); // for debugging
 
 	// All static scene content and the camera are also created as local, so that they are unaffected by scene replication and are
 	// not removed from the client upon connection. Create a Zone component first for ambient lighting & fog control.
@@ -175,7 +181,7 @@ void MyApp::CreateScene()
 	cameraNode->SetPosition(Vector3(0.0f, 5.0f, 0.0f));
 
 	// setup client side prediction
-	csp = scene->CreateComponent<ClientSidePrediction>();
+	//csp = scene->CreateComponent<ClientSidePrediction>();
 }
 
 void MyApp::SetupViewport()
@@ -206,7 +212,6 @@ void MyApp::SubscribeToEvents()
 	SubscribeToEvent(startServerButton_, E_RELEASED, URHO3D_HANDLER(MyApp, HandleStartServer));
 
 	// Subscribe to network events
-	SubscribeToEvent(E_NETWORKUPDATE, URHO3D_HANDLER(MyApp, HandleNetworkUpdate));
 	SubscribeToEvent(E_SERVERCONNECTED, URHO3D_HANDLER(MyApp, HandleConnectionStatus));
 	SubscribeToEvent(E_SERVERDISCONNECTED, URHO3D_HANDLER(MyApp, HandleConnectionStatus));
 	SubscribeToEvent(E_CONNECTFAILED, URHO3D_HANDLER(MyApp, HandleConnectionStatus));
@@ -228,6 +233,16 @@ void MyApp::CreateUI()
 	root->SetDefaultStyle(uiStyle);
 
 	auto graphics = GetSubsystem<Graphics>();
+
+	// Create console
+	auto console = engine_->CreateConsole();
+	console->SetDefaultStyle(uiStyle);
+	console->GetBackground()->SetOpacity(0.8f);
+
+	// Create debug HUD
+	auto debugHud = engine_->CreateDebugHud();
+	debugHud->SetDefaultStyle(uiStyle);
+	debugHud->SetProfilerInterval(1.f / scene->GetComponent<PhysicsWorld>()->GetFps());
 
 	// Construct the instructions text element
 	instructionsText_ = ui->GetRoot()->CreateChild<Text>();
@@ -292,7 +307,7 @@ Node * MyApp::CreateControllableObject()
 	auto cache = GetSubsystem<ResourceCache>();
 
 	// Create the scene node & visual representation. This will be a replicated object
-	auto ballNode = scene->CreateChild("Ball");
+	auto ballNode = scene->CreateChild("Ball", LOCAL);
 	ballNode->SetPosition({ Random(40.0f) - 20.0f, 5.0f, Random(40.0f) - 20.0f });
 	ballNode->SetScale(0.5f);
 	auto ballObject = ballNode->CreateComponent<StaticModel>();
@@ -306,6 +321,10 @@ Node * MyApp::CreateControllableObject()
 	// In addition to friction, use motion damping so that the ball can not accelerate limitlessly
 	body->SetLinearDamping(0.5f);
 	body->SetAngularDamping(0.5f);
+
+	//body->SetCcdMotionThreshold(0.25f);
+	//body->SetCcdRadius(0.5f);
+
 	auto shape = ballNode->CreateComponent<CollisionShape>();
 	shape->SetSphere(1.0f);
 
@@ -313,6 +332,9 @@ Node * MyApp::CreateControllableObject()
 	auto light = ballNode->CreateComponent<Light>();
 	light->SetRange(3.0f);
 	light->SetColor(Color(0.5f + (Rand() & 1) * 0.5f, 0.5f + (Rand() & 1) * 0.5f, 0.5f + (Rand() & 1) * 0.5f));
+
+	auto csp = scene->GetComponent<CSP_Server>();
+	csp->snapshot.add_node(ballNode);
 
 	return ballNode;
 }
@@ -393,10 +415,14 @@ void MyApp::HandleSceneUpdate(StringHash eventType, VariantMap & eventData)
 	}
 }
 
-void MyApp::process_controls(const Controls & controls, RigidBody* body)
+void MyApp::process_controls(Node* ballNode, const Controls & controls)
 {
 	// Torque is relative to the forward vector
 	Quaternion rotation(0.0f, controls.yaw_, 0.0f);
+
+#define CSP_TEST_USE_PHYSICS // used for testing to make sure problems aren't related to the physics
+#ifdef CSP_TEST_USE_PHYSICS
+	auto* body = ballNode->GetComponent<RigidBody>();
 
 	const float MOVE_TORQUE = 3.0f;
 
@@ -411,6 +437,21 @@ void MyApp::process_controls(const Controls & controls, RigidBody* body)
 		body->ApplyTorque(rotation * Vector3::FORWARD * MOVE_TORQUE);
 	if (controls.buttons_ & CTRL_RIGHT)
 		body->ApplyTorque(rotation * Vector3::BACK * MOVE_TORQUE);
+#else
+	const float move_distance = 2.f / scene->GetComponent<PhysicsWorld>()->GetFps();
+
+	// Movement torque is applied before each simulation step, which happen at 60 FPS. This makes the simulation
+	// independent from rendering framerate. We could also apply forces (which would enable in-air control),
+	// but want to emphasize that it's a ball which should only control its motion by rolling along the ground
+	if (controls.buttons_ & CTRL_FORWARD)
+	ballNode->SetPosition(ballNode->GetPosition() + Vector3::RIGHT * move_distance);
+	if (controls.buttons_ & CTRL_BACK)
+	ballNode->SetPosition(ballNode->GetPosition() + Vector3::LEFT * move_distance);
+	if (controls.buttons_ & CTRL_LEFT)
+	ballNode->SetPosition(ballNode->GetPosition() + Vector3::FORWARD * move_distance);
+	if (controls.buttons_ & CTRL_RIGHT)
+	ballNode->SetPosition(ballNode->GetPosition() + Vector3::BACK * move_distance);
+#endif
 }
 
 
@@ -419,41 +460,65 @@ void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
     // This function is different on the client and server. The client collects controls (WASD controls + yaw angle)
     // and sets them to its server connection object, so that they will be sent to the server automatically at a
     // fixed rate, by default 30 FPS. The server will actually apply the controls (authoritative simulation.)
-    auto* network = GetSubsystem<Network>();
-    auto* serverConnection = network->GetServerConnection();
+    auto network = GetSubsystem<Network>();
+    auto serverConnection = network->GetServerConnection();
 
-    // Server: apply controls to client objects
-    if (network->IsServerRunning())
-    {
-        const auto& connections = network->GetClientConnections();
-
-        for (unsigned i = 0; i < connections.Size(); ++i)
-        {
-            Connection* connection = connections[i];
-
-            // Get the object this connection is controlling
-            Node* ballNode = serverObjects_[connection];
-            if (!ballNode)
-                continue;
-
-            auto* body = ballNode->GetComponent<RigidBody>();
-
-            // Get the last controls sent by the client
-            const auto& controls = connection->GetControls();
-
-			process_controls(controls, body);
-        }
-    }
-	else// if (serverConnection)
+	// client
+	if (serverConnection)
 	{
-		sample_controls();
+		auto csp = scene->GetComponent<CSP_Client>();
 
-		auto ballNode = scene->GetNode(clientObjectID_);
-		if (ballNode) {
-			auto* body = ballNode->GetComponent<RigidBody>();
+		auto apply_controls = [&](const Controls& controls) {
+			if (clientObjectID_) {
+				auto ballNode = scene->GetNode(clientObjectID_);
+				if (ballNode != nullptr)
+					process_controls(ballNode, controls);
+			}
+		};
 
-			auto& controls = csp->current_controls ? *csp->current_controls : sampled_controls;
-			process_controls(controls, body);
+		// if not predicting
+		if (csp->current_controls == nullptr)
+		{
+			auto controls = sample_controls();
+
+			// sample controls when not running prediction
+			csp->add_input(controls);
+
+			// predict locally
+			apply_controls(controls);
+
+			// In case the server wants to do position-based interest management using the NetworkPriority components, we should also
+			// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
+			serverConnection->SetPosition(cameraNode->GetPosition());
+		}
+		else {
+			apply_controls(*csp->current_controls);
+		}
+	}
+
+	// Server: apply controls to client objects
+	else if (network->IsServerRunning())
+	{
+		const auto& connections = network->GetClientConnections();
+
+		for (unsigned i = 0; i < connections.Size(); ++i)
+		{
+			Connection* connection = connections[i];
+
+			// Get the object this connection is controlling
+			Node* ballNode = serverObjects_[connection];
+			if (!ballNode)
+				continue;
+
+			// Get the last controls sent by the client
+			//const auto& controls = connection->GetControls();
+			auto csp = scene->GetComponent<CSP_Server>();
+			const auto& controls = csp->client_inputs[connection];
+
+			process_controls(ballNode, controls);
+
+			// update last used ID
+			//csp->client_last_IDs[connection] = controls.extraData_.Find("id")->second_.GetUInt();
 		}
 	}
 }
@@ -464,52 +529,6 @@ void MyApp::HandlePostUpdate(StringHash eventType, VariantMap & eventData)
 	MoveCamera();
 }
 
-void MyApp::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
-{
-	did_sample_controls = false;
-
-	auto* network = GetSubsystem<Network>();
-	auto* serverConnection = network->GetServerConnection();
-
-	// Server:
-	if (network->IsServerRunning())
-	{
-		const auto& connections = network->GetClientConnections();
-
-		for (Connection* connection : connections)
-		{
-			// send last received CSP input ID
-			csp->send_input_ID(connection);
-
-			//// Get the object this connection is controlling
-		 //   Node* ballNode = serverObjects_[connection];
-		 //   if (!ballNode)
-		 //       continue;
-		
-		 //   auto* body = ballNode->GetComponent<RigidBody>();
-		
-		 //   // Get the last controls sent by the client
-		 //   const auto& controls = connection->GetControls();
-		
-			//process_controls(controls, body);
-		}
-	}
-	// Client: collect controls before the network update so they'll be synced with the server
-	else if (is_client)//serverConnection)
-	{
-		if(serverConnection) {
-			csp->add_input(sampled_controls); // add before sending, so it will be tagged with an ID
-			serverConnection->SetControls(sampled_controls);
-			// In case the server wants to do position-based interest management using the NetworkPriority components, we should also
-			// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
-			serverConnection->SetPosition(cameraNode->GetPosition());
-
-			//if (csp->enable_copy)//TODO using it to enable prediction
-				//csp->predict();
-		}
-	}
-}
-
 void MyApp::HandleConnect(StringHash eventType, VariantMap & eventData)
 {
 	auto network = GetSubsystem<Network>();
@@ -517,10 +536,12 @@ void MyApp::HandleConnect(StringHash eventType, VariantMap & eventData)
 	if (address.Empty())
 		address = "localhost"; // Use localhost to connect if nothing else specified
 
-							   // Connect to server, specify scene to use as a client for replication
+	// setup client side prediction
+	scene->CreateComponent<CSP_Client>(LOCAL);
+
+	// Connect to server, specify scene to use as a client for replication
 	clientObjectID_ = 0; // Reset own object ID from possible previous connection
-	//network->Connect(address, SERVER_PORT, scene);
-	csp->Connect(address, SERVER_PORT);
+	network->Connect(address, SERVER_PORT, scene);
 
 	UpdateButtons();
 }
@@ -535,7 +556,7 @@ void MyApp::HandleDisconnect(StringHash eventType, VariantMap & eventData)
 	{
 		// need to remove node from both active & replication scenes
 		scene->GetNode(clientObjectID_)->Remove();
-		csp->replication_scene->GetNode(clientObjectID_)->Remove();
+		//csp->replication_scene->GetNode(clientObjectID_)->Remove();
 		clientObjectID_ = 0;
 
 		serverConnection->Disconnect();
@@ -555,6 +576,9 @@ void MyApp::HandleStartServer(StringHash eventType, VariantMap & eventData)
 {
 	auto network = GetSubsystem<Network>();
 	network->StartServer(SERVER_PORT);
+
+	// setup client side prediction
+	scene->CreateComponent<CSP_Server>(LOCAL);
 
 	UpdateButtons();
 }
@@ -613,10 +637,17 @@ void MyApp::HandleKeyDown(StringHash eventType, VariantMap& eventData)
 		engine_->Exit();
 
 	// for testing
-	if (key == KEY_R)
-		csp->enable_copy = !csp->enable_copy;
-
+	if (key == KEY_R) {
+		auto csp = scene->GetComponent<CSP_Client>();
+		if(csp)
+			csp->enable_copy = !csp->enable_copy;
+	}
+	/*
 	if (key == KEY_T) {
 		csp->test_predict(sampled_controls);
-	}
+	}*/
+
+	// Toggle debug HUD with F2
+	if (key == KEY_F2)
+		GetSubsystem<DebugHud>()->ToggleAll();
 }
