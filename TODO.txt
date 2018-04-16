@@ -1,0 +1,125 @@
+CSP TODO:
+=========
+
+
+- client goes backward when server update is received
+	- possible causes:
+		- server doesn't receive all of the client's inputs, thus travels less further
+			- very likely since the old CSP instantly applies inputs when they're received, while the new FCSP ONLY applies the most recently received one.
+			- debug it using input counters on client and server
+
+
+- prediction is faulty
+	- create nodes as local?
+		- how to automatically know which nodes to send?
+			- new replication state "PREDICTED"
+
+	- SetSplitImpulse()
+	- SetMaxSubSteps()
+		- 0 by default, may mess up determinism:
+		http://www.bulletphysics.org/mediawiki-1.5.8/index.php/Stepping_The_World
+			- urho seems to calculate the needed substeps when set to 0
+
+- instead of applying client input as it arrives (CSP usage of `apply_client_input()`), apply input at the same place the client applies it (physics pre-step in the examples`)
+
+- need to use SmoothedTransform manually?
+
+- only re-apply inputs the server confirmed?
+	- no need since we drop everything before the latest
+
+
+
+
+
+
+
+
+client:
+-------
+sample input
+
+apply input
+
+send input
+
+receive snapshot
+
+predict
+
+
+server:
+-------
+send snapshot
+
+receive input
+
+apply input
+
+
+
+
+CSP:
+- client:
+	- sample input:
+	HandlePhysicsPreStep()
+	- apply input:
+	HandlePhysicsPreStep()
+	- send input:
+	HandlePhysicsPreStep()
+	- receive snapshot:
+	HandleNetworkMessage()
+	- predict:
+	HandleNetworkMessage()
+- server:
+	- send snapshot:
+!	HandleRenderUpdate() -> prepare_state_snapshots() & send_state_updates()
+		- RenderUpdate happens later in the event loop, so the scene is in its final state.
+	- receive input:
+	HandleNetworkMessage() -> read_input()
+	- apply input:
+	HandleNetworkMessage() -> read_input()
+
+
+
+FCSP:
+- client:
+	- sample input:
+	HandlePhysicsPreStep()
+	- apply input:
+	HandlePhysicsPreStep()
+	- send input:
+	HandlePhysicsPreStep()
+	- receive snapshot:
+	HandleNetworkMessage()
+	- predict:
+	HandleNetworkMessage()
+- server:
+	- send snapshot:
+	HandleNetworkUpdate()
+	- receive input:
+	HandleNetworkMessage()
+	- apply input:
+	HandlePhysicsPreStep()
+
+
+
+
+
+
+
+
+
+
+
+DONE:
+=====
+
+
+- something with the forces is messed up - the ball doesn't stop rolling (it does in Urho3D's scene replication sample)
+	- it continue rolling on the server too.
+		- why???
+		- last received input being used multiple times?
+			- doesn't make sense since the ball would accelerate
+		- [SOLUTION] was caused by having too low physics FPS
+
+- instead of adding nodes manually to the snapshot, use all the replicated nodes.

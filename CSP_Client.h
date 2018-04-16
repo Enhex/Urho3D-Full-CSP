@@ -59,6 +59,10 @@ protected:
 	VectorBuffer input_message;
 
 
+	// for debugging
+	unsigned sent_inputs = 0; // number of inputs sent
+
+
 	// Handle custom network messages
 	void HandleNetworkMessage(StringHash eventType, VariantMap& eventData);
 

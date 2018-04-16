@@ -37,9 +37,19 @@ struct CSP_Server : Component
 
 	// Clients' inputs
 	HashMap<Connection*, Controls> client_inputs;
-	//HashMap<Connection*, ID> client_last_IDs; // updated when the input is actually applied
+	HashMap<Connection*, ID> client_last_IDs; // updated when the input is actually applied
 	
 	StateSnapshot snapshot;
+
+	// for debugging
+	unsigned used_inputs = 0; // number of used inputs
+
+	// Update time interval
+	//TODO same as timestep?
+	float updateInterval_ = 1.f / 30.f;	// default to 30 FPS
+	// Update time accumulator
+	float updateAcc_ = 0;
+
 
 	// Read input sent from the client and apply it
 	void read_input(Connection* connection, MemoryBuffer& message);
@@ -49,7 +59,7 @@ protected:
 	VectorBuffer state;
 
 	// send snapshot at network update FPS
-	void HandleNetworkUpdate(StringHash eventType, VariantMap& eventData);
+	void HandleRenderUpdate(StringHash eventType, VariantMap& eventData);
 	// Handle custom network messages
 	void HandleNetworkMessage(StringHash eventType, VariantMap& eventData);
 

@@ -17,7 +17,7 @@ CSP_Server::CSP_Server(Context * context) :
 	Component(context)
 {
 	SubscribeToEvent(E_NETWORKMESSAGE, URHO3D_HANDLER(CSP_Server, HandleNetworkMessage));
-	SubscribeToEvent(E_NETWORKUPDATE, URHO3D_HANDLER(CSP_Server, HandleNetworkUpdate));
+	SubscribeToEvent(E_RENDERUPDATE, URHO3D_HANDLER(CSP_Server, HandleRenderUpdate));
 }
 
 void CSP_Server::RegisterObject(Context * context)
@@ -28,8 +28,6 @@ void CSP_Server::RegisterObject(Context * context)
 
 void CSP_Server::read_input(Connection * connection, MemoryBuffer & message)
 {
-	auto network = GetSubsystem<Network>();
-
 	if (!connection->IsClient())
 	{
 		URHO3D_LOGWARNING("Received unexpected Controls message from server");
@@ -45,8 +43,12 @@ void CSP_Server::read_input(Connection * connection, MemoryBuffer & message)
 	auto& controls = client_inputs[connection];
 
 	// make sure the new input is more recent
-	if(newControls.extraData_["id"].GetUInt() > controls.extraData_["id"].GetUInt())
+	//TODO handle looping
+	if (newControls.extraData_["id"].GetUInt() > controls.extraData_["id"].GetUInt()) {
 		controls = newControls;
+		client_last_IDs[connection] = controls.extraData_["id"].GetUInt();
+	}
+
 
 	//TODO replace with an array of client inputs that the server code can use, instead of passing it via function parameter?
 	//apply_client_input(newControls, timestep, connection);
@@ -79,6 +81,7 @@ void CSP_Server::prepare_state_snapshot()
 	state.WriteUInt(0);
 
 	auto scene = GetScene();
+	//scene->ApplyAttributes();
 
 	//snapshot.nodes.clear();
 	//add_replicated_child_nodes(snapshot, scene);
@@ -99,8 +102,9 @@ void CSP_Server::send_state_updates()
 void CSP_Server::send_state_update(Connection * connection)
 {
 	// Set the last input ID per connection
-	unsigned int last_id = client_inputs[connection].extraData_["id"].GetUInt();
-
+	//unsigned int last_id = client_inputs[connection].extraData_["id"].GetUInt();
+	unsigned int last_id = client_last_IDs[connection];
+	
 	GetSubsystem<DebugHud>()->SetAppStats("last_id: ", last_id);
 
 	state.Seek(0);
@@ -109,10 +113,23 @@ void CSP_Server::send_state_update(Connection * connection)
 	connection->SendMessage(MSG_CSP_STATE, false, false, state);
 }
 
-void CSP_Server::HandleNetworkUpdate(StringHash eventType, VariantMap & eventData)
+void CSP_Server::HandleRenderUpdate(StringHash eventType, VariantMap& eventData)
 {
-	prepare_state_snapshot();
-	send_state_updates();
+	auto network = GetSubsystem<Network>();
+
+	auto timeStep = eventData[RenderUpdate::P_TIMESTEP].GetFloat();
+
+	// Check if periodic update should happen now
+	updateAcc_ += timeStep;
+	bool updateNow = updateAcc_ >= updateInterval_;
+
+	if (updateNow && network->IsServerRunning())
+	{
+		updateAcc_ = fmodf(updateAcc_, updateInterval_);
+
+		prepare_state_snapshot();
+		send_state_updates();
+	}
 }
 
 void CSP_Server::HandleNetworkMessage(StringHash eventType, VariantMap & eventData)

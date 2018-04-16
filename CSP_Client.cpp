@@ -13,7 +13,7 @@
 #include <Urho3D/Scene/Scene.h>
 #include <Urho3D/Scene/SceneEvents.h>
 #include <Urho3D/Scene/SmoothedTransform.h>
-
+#include <algorithm>
 
 CSP_Client::CSP_Client(Context * context) :
 	Component(context)
@@ -40,6 +40,7 @@ void CSP_Client::add_input(Controls& new_input)
 	send_input(new_input);
 
 	GetSubsystem<DebugHud>()->SetAppStats("client id: ", id);
+	GetSubsystem<DebugHud>()->SetAppStats("add_input() input_buffer.size(): ", input_buffer.size());
 }
 
 void CSP_Client::send_input(Controls & controls)
@@ -57,6 +58,9 @@ void CSP_Client::send_input(Controls & controls)
 	input_message.WriteVariantMap(controls.extraData_);
 
 	server_connection->SendMessage(MSG_CSP_INPUT, false, false, input_message);
+	//server_connection->SendMessage(MSG_CSP_INPUT, true, true, input_message);
+
+	GetSubsystem<DebugHud>()->SetAppStats("num_inputs: ", ++sent_inputs);
 }
 
 void CSP_Client::read_last_id(MemoryBuffer & message)
@@ -95,6 +99,8 @@ void CSP_Client::reapply_inputs()
 	auto physicsWorld = scene->GetComponent<PhysicsWorld>();
 	const auto timestep = 1.f / physicsWorld->GetFps();
 
+	GetSubsystem<DebugHud>()->SetAppStats("reapply_inputs() input_buffer.size(): ", input_buffer.size());
+
 	// step a tick
 	for (auto& controls : input_buffer)
 	{
@@ -109,33 +115,25 @@ void CSP_Client::reapply_inputs()
 
 void CSP_Client::remove_obsolete_history()
 {
-	std::vector<Controls> new_input_buffer;
-
-	for (size_t i = 0; i < input_buffer.size(); ++i)
-	{
-		auto& controls = input_buffer[i];
-		unsigned update_id = controls.extraData_["id"].GetUInt();
-		bool remove = false;
-
-		// Handle value range looping correctly
-		if (id > server_id)
-		{
-			if (update_id <= server_id ||
-				update_id > id)
-				remove = true;
-		}
-		else
-		{
-			if (update_id >= server_id ||
-				update_id < id)
-				remove = true;
-		}
-
-		if (!remove)
-			new_input_buffer.push_back(controls);
-	}
-
-	input_buffer = std::move(new_input_buffer);
+	input_buffer.erase(
+		std::remove_if(input_buffer.begin(), input_buffer.end(), [&](Controls& controls) {
+			unsigned update_id = controls.extraData_["id"].GetUInt();
+			// Handle value range looping correctly
+			if (id >= server_id)
+			{
+				if (update_id <= server_id ||
+					update_id > id)
+					return true;
+			}
+			else
+			{
+				if (update_id >= server_id ||
+					update_id < id)
+					return true;
+			}
+			return false;
+		}),
+		input_buffer.end());
 }
 
 
@@ -160,7 +158,7 @@ void CSP_Client::HandleNetworkMessage(StringHash eventType, VariantMap & eventDa
 				// read state snapshot
 				auto scene = network->GetServerConnection()->GetScene();
 				snapshot.read_state(message, scene);
-				scene->ApplyAttributes();
+				//scene->ApplyAttributes();
 			}
 
 			// Perform client side prediction

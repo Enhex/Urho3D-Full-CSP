@@ -130,7 +130,8 @@ void MyApp::CreateScene()
 	scene->CreateComponent<Octree>(LOCAL);
 	auto physicsWorld = scene->CreateComponent<PhysicsWorld>(LOCAL);
 	
-	//physicsWorld->SetFps(10); // for debugging
+	physicsWorld->SetSplitImpulse(true);
+	//physicsWorld->SetFps(20); // for debugging
 
 	// All static scene content and the camera are also created as local, so that they are unaffected by scene replication and are
 	// not removed from the client upon connection. Create a Zone component first for ambient lighting & fog control.
@@ -420,23 +421,32 @@ void MyApp::process_controls(Node* ballNode, const Controls & controls)
 	// Torque is relative to the forward vector
 	Quaternion rotation(0.0f, controls.yaw_, 0.0f);
 
-#define CSP_TEST_USE_PHYSICS // used for testing to make sure problems aren't related to the physics
+//#define CSP_TEST_USE_PHYSICS // used for testing to make sure problems aren't related to the physics
 #ifdef CSP_TEST_USE_PHYSICS
 	auto* body = ballNode->GetComponent<RigidBody>();
 
 	const float MOVE_TORQUE = 3.0f;
 
+	auto change_func = [&](Vector3 force) {
+//#define CSP_TEST_USE_VELOCITY
+#ifdef CSP_TEST_USE_VELOCITY
+		body->ApplyForce(force);
+#else
+		body->ApplyTorque(force);
+#endif
+	};
+
 	// Movement torque is applied before each simulation step, which happen at 60 FPS. This makes the simulation
 	// independent from rendering framerate. We could also apply forces (which would enable in-air control),
 	// but want to emphasize that it's a ball which should only control its motion by rolling along the ground
 	if (controls.buttons_ & CTRL_FORWARD)
-		body->ApplyTorque(rotation * Vector3::RIGHT * MOVE_TORQUE);
+		change_func(rotation * Vector3::RIGHT * MOVE_TORQUE);
 	if (controls.buttons_ & CTRL_BACK)
-		body->ApplyTorque(rotation * Vector3::LEFT * MOVE_TORQUE);
+		change_func(rotation * Vector3::LEFT * MOVE_TORQUE);
 	if (controls.buttons_ & CTRL_LEFT)
-		body->ApplyTorque(rotation * Vector3::FORWARD * MOVE_TORQUE);
+		change_func(rotation * Vector3::FORWARD * MOVE_TORQUE);
 	if (controls.buttons_ & CTRL_RIGHT)
-		body->ApplyTorque(rotation * Vector3::BACK * MOVE_TORQUE);
+		change_func(rotation * Vector3::BACK * MOVE_TORQUE);
 #else
 	const float move_distance = 2.f / scene->GetComponent<PhysicsWorld>()->GetFps();
 
@@ -455,8 +465,17 @@ void MyApp::process_controls(Node* ballNode, const Controls & controls)
 }
 
 
+float debug_timestep = 0;
+
 void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
 {
+	// make sure the timestep is fixed
+	auto timestep = eventData[PhysicsPreStep::P_TIMESTEP].GetFloat();
+
+	if (debug_timestep != 0)
+		assert(debug_timestep == timestep);
+	debug_timestep = timestep;
+
     // This function is different on the client and server. The client collects controls (WASD controls + yaw angle)
     // and sets them to its server connection object, so that they will be sent to the server automatically at a
     // fixed rate, by default 30 FPS. The server will actually apply the controls (authoritative simulation.)
@@ -476,20 +495,20 @@ void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
 			}
 		};
 
+		// In case the server wants to do position-based interest management using the NetworkPriority components, we should also
+		// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
+		serverConnection->SetPosition(cameraNode->GetPosition());
+
 		// if not predicting
 		if (csp->current_controls == nullptr)
 		{
 			auto controls = sample_controls();
 
-			// sample controls when not running prediction
-			csp->add_input(controls);
-
 			// predict locally
 			apply_controls(controls);
 
-			// In case the server wants to do position-based interest management using the NetworkPriority components, we should also
-			// tell it our observer (camera) position. In this sample it is not in use, but eg. the NinjaSnowWar game uses it
-			serverConnection->SetPosition(cameraNode->GetPosition());
+			// sample controls when not running prediction
+			csp->add_input(controls);
 		}
 		else {
 			apply_controls(*csp->current_controls);
@@ -513,12 +532,18 @@ void MyApp::HandlePhysicsPreStep(StringHash eventType, VariantMap& eventData)
 			// Get the last controls sent by the client
 			//const auto& controls = connection->GetControls();
 			auto csp = scene->GetComponent<CSP_Server>();
-			const auto& controls = csp->client_inputs[connection];
+			auto& controls = csp->client_inputs[connection];
 
 			process_controls(ballNode, controls);
 
 			// update last used ID
-			//csp->client_last_IDs[connection] = controls.extraData_.Find("id")->second_.GetUInt();
+			csp->client_last_IDs[connection] = controls.extraData_.Find("id")->second_.GetUInt();
+
+
+			GetSubsystem<DebugHud>()->SetAppStats("num_inputs: ", ++csp->used_inputs);
+
+			// reset controls
+			controls = Controls();
 		}
 	}
 }
@@ -578,7 +603,8 @@ void MyApp::HandleStartServer(StringHash eventType, VariantMap & eventData)
 	network->StartServer(SERVER_PORT);
 
 	// setup client side prediction
-	scene->CreateComponent<CSP_Server>(LOCAL);
+	auto csp = scene->CreateComponent<CSP_Server>(LOCAL);
+	csp->updateInterval_ = 1.f / 1.f;
 
 	UpdateButtons();
 }
@@ -649,5 +675,5 @@ void MyApp::HandleKeyDown(StringHash eventType, VariantMap& eventData)
 
 	// Toggle debug HUD with F2
 	if (key == KEY_F2)
-		GetSubsystem<DebugHud>()->ToggleAll();
+		GetSubsystem<DebugHud>()->Toggle(DEBUGHUD_SHOW_STATS);
 }
