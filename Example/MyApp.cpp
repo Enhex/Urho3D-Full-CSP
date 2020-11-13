@@ -129,8 +129,9 @@ void MyApp::CreateScene()
 	// when a client connects
 	scene->CreateComponent<Octree>(LOCAL);
 	auto physicsWorld = scene->CreateComponent<PhysicsWorld>(LOCAL);
+	physicsWorld->SetInterpolation(false); // needed for determinism
 	
-	physicsWorld->SetSplitImpulse(true);
+	//physicsWorld->SetSplitImpulse(true);
 	//physicsWorld->SetFps(20); // for debugging
 
 	// All static scene content and the camera are also created as local, so that they are unaffected by scene replication and are

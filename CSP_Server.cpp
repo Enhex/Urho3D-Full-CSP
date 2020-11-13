@@ -1,4 +1,3 @@
-#include "CSP_Client.h"
 #include "CSP_Server.h"
 
 #include "copy_node.h"

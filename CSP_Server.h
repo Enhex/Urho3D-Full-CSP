@@ -2,6 +2,7 @@
 
 #include "CSP_Server.h"
 #include "CSP_messages.h"
+#include "StateSnapshot.h"
 #include <Urho3D/Scene/Component.h>
 #include <vector>
 

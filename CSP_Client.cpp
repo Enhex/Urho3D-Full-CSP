@@ -60,7 +60,7 @@ void CSP_Client::send_input(Controls & controls)
 	server_connection->SendMessage(MSG_CSP_INPUT, false, false, input_message);
 	//server_connection->SendMessage(MSG_CSP_INPUT, true, true, input_message);
 
-	GetSubsystem<DebugHud>()->SetAppStats("num_inputs: ", ++sent_inputs);
+	GetSubsystem<DebugHud>()->SetAppStats("sent_inputs: ", ++sent_inputs);
 }
 
 void CSP_Client::read_last_id(MemoryBuffer & message)

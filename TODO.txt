@@ -1,12 +1,28 @@
 CSP TODO:
 =========
 
+- does the server apply the input on the coressponding tick it was used on by the client?
+	- server dropping inputs if they're received in the same frame?
+
+- when:
+add_input() input_buffer.size() = 2, and
+reapply_inputs() input_buffer.size() = 0
+there's a jump backwards.
+	- 1 input too much?
+	- seems to be related to desync between input sampling rate and state snapshots rate.
+		- should be robust to such thing
+
+
+
 
 - client goes backward when server update is received
 	- possible causes:
+
 		- server doesn't receive all of the client's inputs, thus travels less further
 			- very likely since the old CSP instantly applies inputs when they're received, while the new FCSP ONLY applies the most recently received one.
 			- debug it using input counters on client and server
+
+		- 
 
 
 - prediction is faulty
@@ -77,7 +93,7 @@ CSP:
 	- receive input:
 	HandleNetworkMessage() -> read_input()
 	- apply input:
-	HandleNetworkMessage() -> read_input()
+!	HandleNetworkMessage() -> read_input()
 
 
 
